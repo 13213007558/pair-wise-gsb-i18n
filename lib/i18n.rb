@@ -15,6 +15,7 @@ module I18n
   autoload :Locale,  'i18n/locale'
   autoload :Tests,   'i18n/tests'
   autoload :Middleware,   'i18n/middleware'
+  autoload :PseudoLocalizer, 'i18n/pseudo_localizer'
 
   RESERVED_KEYS = %i[
     cascade

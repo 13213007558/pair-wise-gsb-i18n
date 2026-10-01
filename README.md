@@ -66,6 +66,51 @@ I18n.config.with(locale: :ja).set!
 `set!` stores a frozen config in the current execution context.
 This keeps inherited state safe and lets updates happen by replacing config objects.
 
+### Pseudo-localization
+
+You can register one or more pseudo locales to check server-rendered pages and
+emails for length overflow, encoding issues and hard-coded strings before real
+translations are available. Translations for a pseudo locale are resolved from
+the source locale (the default locale, unless configured otherwise) and then
+transformed: characters are replaced with accented variants, the text is
+expanded by a deterministic ratio and wrapped in configurable markers.
+
+```ruby
+I18n.backend = I18n::Backend::Simple.new
+I18n.backend.extend(I18n::Backend::PseudoLocale)
+I18n.config.pseudo_locales = [:ps]
+I18n.available_locales = [:en, :ps]
+
+I18n.t('inbox.messages', locale: :ps, count: 2)
+# => "⟦2 ɱëššàğëšàçèñ⟧" (pluralization and interpolation still apply)
+```
+
+Pluralization and interpolation keep working through the normal I18n flow, and
+interpolated user values are never expanded. Interpolation placeholders
+(`%{name}`, `%<name>fmt`, `%%`), HTML tags, HTML entities, URLs, email
+addresses and business identifiers (e.g. `ORD-12345`) are preserved as-is, so
+links and IDs are never rewritten. The transformation is deterministic: the
+same template always yields the same output.
+
+The transformation can be tuned through the config:
+
+```ruby
+I18n.config.pseudo_expansion_ratio = 0.5        # default: 0.35, 0 disables expansion
+I18n.config.pseudo_markers = ['[', ']']         # default: ["⟦", "⟧"]
+I18n.config.pseudo_source_locale = :en          # default: the default locale
+I18n.config.pseudo_character_map = { 'a' => 'α' } # replaces the default map
+I18n.config.pseudo_preserve_patterns = [/ACME-\d+/] # extra tokens to keep verbatim
+```
+
+Format fragments that are not understood (e.g. a bare `%d`) are kept verbatim
+and reported so they can be inspected:
+
+```ruby
+I18n::PseudoLocalizer.unsupported_fragments
+# => [{ fragment: "%d", template: "Value: %d units" }]
+I18n::PseudoLocalizer.clear_unsupported_fragments
+```
+
 ## Features
 
 * Translation and localization

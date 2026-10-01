@@ -195,5 +195,85 @@ module I18n
     def interpolation_patterns=(interpolation_patterns)
       @@interpolation_patterns = interpolation_patterns
     end
+
+    # Returns the locales that are treated as pseudo locales. Defaults to [].
+    # See I18n::Backend::PseudoLocale.
+    def pseudo_locales
+      @@pseudo_locales ||= []
+    end
+
+    # Sets the locales that are served pseudo-localized translations.
+    def pseudo_locales=(locales)
+      @@pseudo_locales = Array(locales).compact.map { |locale| locale.to_sym }
+    end
+
+    # Returns the locale pseudo-localized templates are sourced from.
+    # Defaults to nil, which means the default locale is used.
+    def pseudo_source_locale
+      @@pseudo_source_locale ||= nil
+    end
+
+    # Sets the source locale for pseudo-localized translations.
+    def pseudo_source_locale=(locale)
+      @@pseudo_source_locale = locale && locale.to_sym
+    end
+
+    # Returns the deterministic expansion ratio used to grow pseudo-localized
+    # text. Defaults to I18n::PseudoLocalizer::DEFAULT_EXPANSION_RATIO.
+    def pseudo_expansion_ratio
+      @@pseudo_expansion_ratio ||= PseudoLocalizer::DEFAULT_EXPANSION_RATIO
+    end
+
+    # Sets the expansion ratio for pseudo-localized text. Set to 0 to disable
+    # expansion.
+    def pseudo_expansion_ratio=(ratio)
+      @@pseudo_expansion_ratio = ratio && ratio.to_f
+    end
+
+    # Returns the left and right markers wrapped around pseudo-localized
+    # strings. Defaults to I18n::PseudoLocalizer::DEFAULT_MARKERS.
+    def pseudo_markers
+      @@pseudo_markers ||= PseudoLocalizer::DEFAULT_MARKERS
+    end
+
+    # Sets the left and right markers for pseudo-localized strings. Accepts a
+    # pair of strings, e.g. I18n.config.pseudo_markers = ["[", "]"]. Use
+    # ["", ""] to disable markers.
+    def pseudo_markers=(markers)
+      if markers.nil?
+        @@pseudo_markers = nil
+        return
+      end
+      markers = Array(markers)
+      unless markers.size == 2
+        raise ArgumentError, "pseudo_markers must be a pair of [left, right] strings"
+      end
+      @@pseudo_markers = markers.map { |marker| marker.to_s }
+    end
+
+    # Returns the character substitution map used for pseudo-localization.
+    # Defaults to I18n::PseudoLocalizer::DEFAULT_CHARACTER_MAP.
+    def pseudo_character_map
+      @@pseudo_character_map ||= PseudoLocalizer::DEFAULT_CHARACTER_MAP
+    end
+
+    # Sets the character substitution map used for pseudo-localization.
+    def pseudo_character_map=(map)
+      @@pseudo_character_map = map
+    end
+
+    # Returns the patterns for tokens (e.g. business IDs) that must be kept
+    # verbatim during pseudo-localization. Defaults to
+    # I18n::PseudoLocalizer::DEFAULT_PRESERVE_PATTERNS.
+    def pseudo_preserve_patterns
+      @@pseudo_preserve_patterns ||= PseudoLocalizer::DEFAULT_PRESERVE_PATTERNS
+    end
+
+    # Sets the patterns for tokens that must be kept verbatim during
+    # pseudo-localization. This replaces the defaults; include
+    # I18n::PseudoLocalizer::DEFAULT_PRESERVE_PATTERNS to keep them.
+    def pseudo_preserve_patterns=(patterns)
+      @@pseudo_preserve_patterns = patterns && Array(patterns)
+    end
   end
 end
