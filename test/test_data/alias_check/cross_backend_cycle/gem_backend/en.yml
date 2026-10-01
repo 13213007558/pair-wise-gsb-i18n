@@ -1,0 +1,7 @@
+en:
+  marketing:
+    # Also fine alone: :promo.banner is assumed to live in the app.
+    offer: :promo.banner
+  other:
+    fine: "gem-provided text"
+    dangle: :marketing.missing

@@ -1,0 +1,5 @@
+en:
+  welcome: "Welcome"
+  shared:
+    btn: "OK button"
+  via_en: :welcome

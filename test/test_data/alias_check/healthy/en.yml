@@ -1,0 +1,13 @@
+en:
+  simple: :target
+  target: "real string"
+  nested:
+    link: :"deep.value"
+  deep:
+    value: 42
+  ns:
+    leaf: "in namespace"
+  alias_to_ns: :ns
+  list:
+    - "plain"
+    - :inert_symbol

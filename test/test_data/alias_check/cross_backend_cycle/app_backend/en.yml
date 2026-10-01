@@ -1,0 +1,6 @@
+en:
+  # Looks innocent and is perfectly fine when this backend is checked
+  # alone: :marketing.offer is assumed to be provided by another backend.
+  promo:
+    banner: :marketing.offer
+  standalone: "app-only text"

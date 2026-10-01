@@ -1,0 +1,100 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# i18n-alias-check - read-only static checker for Symbol aliases in
+# translation files across a backend chain with locale fallbacks.
+#
+# Usage:
+#   i18n-alias-check --backend DIR --backend DIR [options]
+#
+# Exit status: 0 = no cycles/dangling/load errors, 1 = problems found,
+#              2 = invalid invocation.
+#
+# The tool parses translation files into detached in-memory hashes; it
+# never instantiates I18n backends, never touches I18n's translation
+# cache and never calls Proc values.
+
+require 'optparse'
+
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+require 'i18n/alias_checker'
+
+module I18nAliasCheckCLI
+  module_function
+
+  def run(argv)
+    options = {
+      backends: [],
+      defaults: [:en],
+      mappings: {},
+      format: :text,
+      show_ok: false
+    }
+
+    parser = OptionParser.new do |o|
+      o.banner = 'Usage: i18n-alias-check --backend DIR --backend DIR [options]'
+
+      o.on('-b', '--backend DIR',
+           'Translation directory for one backend in chain order (repeatable;',
+           'first given = highest priority)') do |dir|
+        options[:backends] << dir
+      end
+
+      o.on('--fallback-default LOCALE',
+           'Default fallback locale appended to every fallback chain (repeatable;',
+           'default: en; pass "none" to disable)') do |locale|
+        options[:defaults] = [] unless options[:default_flag_seen]
+        options[:default_flag_seen] = true
+        options[:defaults] << locale.to_sym unless locale == 'none'
+      end
+
+      o.on('-m', '--map FROM:TO',
+           'Explicit fallback mapping, e.g. ca:es-ES (repeatable)') do |pair|
+        from, to = pair.split(':', 2)
+        raise OptionParser::InvalidArgument, pair if from.nil? || to.nil?
+        (options[:mappings][from.to_sym] ||= []) << to.to_sym
+      end
+
+      o.on('--json', 'Emit machine-readable JSON') { options[:format] = :json }
+      o.on('-v', '--verbose', 'Also list aliases that resolve successfully') do
+        options[:show_ok] = true
+      end
+      o.on('-h', '--help', 'Show this help') { puts o; exit 0 }
+    end
+
+    parser.parse!(argv)
+
+    if options[:backends].empty?
+      warn parser.help
+      warn "\nError: at least one --backend directory is required"
+      exit 2
+    end
+
+    missing = options[:backends].reject { |d| File.directory?(d) }
+    unless missing.empty?
+      warn "Error: not a directory: #{missing.join(', ')}"
+      exit 2
+    end
+
+    backends, errors = I18n::AliasChecker.load_backends(options[:backends])
+    report = I18n::AliasChecker.analyze(
+      backends, errors,
+      defaults: options[:defaults],
+      mappings: options[:mappings]
+    )
+
+    output = I18n::AliasChecker.format_report(
+      report, backends,
+      format: options[:format], show_ok: options[:show_ok]
+    )
+    puts output
+
+    bad = report.cycles.size + report.danglings.size + report.load_errors.size
+    exit(bad.zero? ? 0 : 1)
+  rescue OptionParser::InvalidArgument
+    warn "Error: invalid --map value, expected FROM:TO"
+    exit 2
+  end
+end
+
+I18nAliasCheckCLI.run(ARGV)

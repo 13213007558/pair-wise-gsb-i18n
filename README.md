@@ -93,6 +93,66 @@ This keeps inherited state safe and lets updates happen by replacing config obje
 * ActiveRecord (optionally: ActiveRecord::Missing and ActiveRecord::StoreProcs)
 * KeyValue (uses active_support/json and cannot store procs)
 
+## Static alias (Symbol link) checker
+
+Translation values that are Symbols act as **links** to other keys and are
+resolved at lookup time. Because a link is resolved through the *whole*
+backend chain and the *full* locale fallback order, two translation files can
+each look perfectly fine on their own yet form a circular alias (or point at
+a missing key) only once they are combined. At runtime such a cycle raises
+`SystemStackError`.
+
+`I18n::AliasChecker` is a **read-only** static checker that resolves every
+Symbol alias exactly the way a real lookup would and reports:
+
+* **circular aliases** – the cycle, every entry point into it and the full
+  per-hop chain (backend, locale and file of each link), including cycles
+  that only form *across* two backends;
+* **dangling aliases** – links whose target key does not exist under the
+  backend chain and fallback order;
+* **dynamic targets** – aliases that end at a `Proc`; these cannot be
+  decided statically and are **never invoked**;
+* the **final target type** (`String`, `Hash`, …) and complete resolution
+  chain for every healthy alias.
+
+It honours the real query semantics: backend chain priority (a backend's own
+fallback locale is searched before moving to the next backend),
+`I18n::Locale::Fallbacks` ordering (self, parents, explicit mappings, then
+default locales), dotted/mid-namespace links, explicit `nil` falling through
+the chain, and Chain namespace merging. It parses files into detached in-memory
+hashes: it never instantiates an I18n backend, never touches the translation
+cache and never calls a `Proc`.
+
+Run it from the command line with one `--backend` directory per backend in
+priority order:
+
+```sh
+ruby bin/i18n-alias-check \
+  --backend config/locales/app \
+  --backend config/locales/gems \
+  --fallback-default en          # default; pass "none" to disable
+```
+
+Useful options: `--map ca:es-ES` (repeatable explicit fallback mapping),
+`-v/--verbose` (also list healthy aliases), `--json` (machine readable).
+Exit status is `0` when there are no cycles, dangling aliases or file load
+errors, and `1` otherwise.
+
+You can also use the API directly:
+
+```ruby
+require 'i18n/alias_checker'
+
+backends, errors = I18n::AliasChecker.load_backends(['config/locales/app',
+                                                     'config/locales/gems'])
+report = I18n::AliasChecker.analyze(backends, errors,
+                                    defaults: [:en],
+                                    mappings: { ca: :"es-ES" })
+report.cycles     # cross-backend cycles with their entry points and hops
+report.danglings  # links to missing keys
+report.dynamics   # links that terminate at a Proc
+```
+
 For more information and lots of resources see [the 'Resources' page on the wiki](https://github.com/ruby-i18n/i18n/wiki/Resources).
 
 ## Tests

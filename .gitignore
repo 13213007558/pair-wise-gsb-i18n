@@ -11,3 +11,4 @@ pkg
 .tool-versions
 Gemfile.lock
 gemfiles/*.lock
+*.gem

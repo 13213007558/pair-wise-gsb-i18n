@@ -1,0 +1,5 @@
+de:
+  hello: :willkommen
+  willkommen: "Willkommen"
+  broken_de: :nicht.da
+  jumps_to_en: :welcome
