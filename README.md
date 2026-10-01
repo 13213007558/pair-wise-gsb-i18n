@@ -86,6 +86,44 @@ This keeps inherited state safe and lets updates happen by replacing config obje
 * Locale fallbacks, RFC4647 compliant (optionally: RFC4646 locale validation)
 * [Gettext support](https://github.com/ruby-i18n/i18n/wiki/Gettext)
 * Translation metadata
+* Pseudo-localization (opt-in pseudo locale for layout/length-overflow checks)
+
+## Pseudo-localization
+
+Pseudo-localization lets you check server-rendered pages and emails for
+length overflow and encoding issues before the real translations are
+delivered. When enabled for a locale, source-language text is expanded by a
+deterministic, configurable ratio, letters are replaced with accented
+look-alikes, and the result is wrapped in configurable markers — while
+`%{name}`/`%<name>d` placeholders, `%%`, HTML tags, HTML entities, URLs,
+email addresses and business-ID-like tokens (UUIDs, `ORD-12345`, ...) are
+left untouched.
+
+Pluralization and interpolation still run through the normal I18n flow, so
+values interpolated at runtime are never expanded or rewritten. Unsupported
+format fragments (e.g. a bare `%s`) are preserved verbatim and reported
+through a queryable hints API.
+
+```ruby
+I18n::Backend::Simple.include(I18n::Backend::PseudoLocale)
+
+I18n::PseudoLocale.configure do |config|
+  config.locales = [:ps]          # locales that get pseudo-localized output
+  config.expansion_ratio = 1.4    # deterministic expansion of source text
+  config.left_marker = '⟦'        # markers wrapped around every string
+  config.right_marker = '⟧'
+end
+
+I18n.locale = :ps
+I18n.t('inbox', count: 5)   # => "⟦5 ɱëššàğëšâãå⟧" (count is not expanded)
+
+I18n::PseudoLocale.hints        # => [#<Hint fragment="%s", ...>, ...]
+I18n::PseudoLocale.clear_hints
+```
+
+Keys missing in the pseudo locale fall back to the default locale's source
+text, so the whole UI can be exercised before translations exist. Repeated
+runs over the same templates always produce identical output.
 
 ## Alternative Backend
 
