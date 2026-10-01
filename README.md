@@ -95,6 +95,63 @@ This keeps inherited state safe and lets updates happen by replacing config obje
 
 For more information and lots of resources see [the 'Resources' page on the wiki](https://github.com/ruby-i18n/i18n/wiki/Resources).
 
+## Transliteration
+
+I18n maps UTF-8 characters to an ASCII approximation, using a hash of
+character rules, a proc, or declarative multi-character rules:
+
+```ruby
+I18n::Backend::Transliterator.get.transliterate("Ærøskøbing")
+# => "AEroskobing"
+
+I18n.transliterate("Jürgen") # => "Jurgen"
+```
+
+You can override a locale's rule with a Hash (single characters), a Proc
+or a list of declarative `I18n::Backend::Transliterator::Rule` objects:
+
+```ruby
+rule = I18n::Backend::Transliterator::Rule
+I18n.backend.store_translations(:de, :i18n => { :transliterate => { :rule => [
+  rule.new(:from => "ü", :to => "ue"),
+  # digraph: both characters together become one syllable
+  rule.new(:from => "sch", :to => "sh", :match_ascii => true),
+  # contexts may be Strings or Regexps (word boundary, lookbehind, ...)
+  rule.new(:from => "ch", :to => "k", :match_ascii => true, :right => /\b/),
+  # equal-length overlaps are disambiguated by priority (then definition order)
+  rule.new(:from => "ae", :to => "E", :priority => 10, :match_ascii => true)
+] } })
+```
+
+Declarative rules support:
+
+* multi-character `from` input and arbitrary `to` output (including `""`);
+* finite `left` and `right` contexts given as Strings or Regexps;
+* integer `priority` for overlapping rules (higher wins, default `0`);
+* longest valid match by default, then priority, then definition order;
+* matching under an explicit Unicode normalization form (NFC by default,
+  pass `normalization_form: :nfd|:nfkc|:nfkd` to `Transliterator.get`),
+  so decomposed input like `u` + combining diaeresis matches `ü`;
+* inheritance of the default Latin => ASCII approximations, overridable
+  per rule.
+
+Pure ASCII sequences only match when a rule sets `match_ascii: true`.
+The engine performs a single left-to-right scan and never feeds
+transliterated output back through the rules, so the same input always
+yields the same result.
+
+`transliterate_with_ranges` additionally returns each output fragment
+together with the codepoint range it occupied in the original input:
+
+```ruby
+t = I18n::Backend::Transliterator.get(rule.new(:from => "ü", :to => "ue"))
+t.transliterate_with_ranges("hübsch")
+# => [["h", 0...1], ["ue", 1...2], ["b", 2...3], ...]
+```
+
+Characters without a rule keep using the `replacement` option
+(default `"?"`, or `:none` to keep them unchanged).
+
 ## Tests
 
 You can run tests both with
