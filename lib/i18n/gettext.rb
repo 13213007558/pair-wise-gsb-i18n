@@ -6,8 +6,10 @@ module I18n
     CONTEXT_SEPARATOR = "\004"
 
     autoload :Helpers, 'i18n/gettext/helpers'
+    autoload :PluralForm, 'i18n/gettext/plural_form'
 
     @@plural_keys = { :en => [:one, :other] }
+    @@plural_forms_conflict = :raise
 
     class << self
       # returns an array of plural keys for the given locale or the whole hash
@@ -16,6 +18,18 @@ module I18n
       # TODO move this information to the pluralization module
       def plural_keys(*args)
         args.empty? ? @@plural_keys : @@plural_keys[args.first] || @@plural_keys[:en]
+      end
+
+      def plural_forms_conflict
+        @@plural_forms_conflict
+      end
+
+      def plural_forms_conflict=(strategy)
+        unless [:raise, :first, :last].include?(strategy)
+          raise ArgumentError, "unknown Plural-Forms conflict strategy #{strategy.inspect}; expected one of :raise, :first, or :last"
+        end
+
+        @@plural_forms_conflict = strategy
       end
 
       def extract_scope(msgid, separator)

@@ -37,6 +37,14 @@ module I18n
       # use the explicit `"0"` and `"1"` keys.
       # https://unicode-org.github.io/cldr/ldml/tr35-numbers.html#Explicit_0_1_rules
       def pluralize(locale, entry, count)
+        if entry.respond_to?(:po_plural_translation?) && entry.po_plural_translation? && count
+          plural_form = entry.plural_form
+          index = plural_form.call(count)
+          return entry.fetch(index) do
+            raise I18n::InvalidPluralizationData.new(entry, count, index)
+          end
+        end
+
         return entry unless entry.is_a?(Hash) && count
 
         pluralizer = pluralizer(locale)
