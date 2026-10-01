@@ -95,6 +95,57 @@ This keeps inherited state safe and lets updates happen by replacing config obje
 
 For more information and lots of resources see [the 'Resources' page on the wiki](https://github.com/ruby-i18n/i18n/wiki/Resources).
 
+## Static alias (link) checking
+
+Translation values that are Symbols are links to other keys (see
+`I18n::Backend::Base#resolve`). Because links are followed lazily at lookup
+time, mistakes only surface at runtime: links can form infinite cycles, point
+at keys that do not exist (dangling references), or resolve to unexpected
+value types. A cycle can be invisible while reviewing files individually,
+because it only closes once a query crosses two backends of a backend chain
+(possibly across locale fallbacks).
+
+`I18n::Backend::AliasChecker` is a *read-only, static* checker. It loads
+translation files into throwaway, in-memory data and simulates a real query
+exactly — backend chain priority (with leftmost-wins namespace merges), the
+absolute-key scope semantics of links, and the locale fallback order (every
+alias hop restarts from the originally requested locale). Dynamic values
+(Procs) are reported as such and are never called, and `I18n.backend`,
+`I18n.config`, `I18n.load_path`, the fallbacks global and translation caches
+are never modified.
+
+```ruby
+require 'i18n/backend/alias_checker'
+
+checker = I18n::Backend::AliasChecker.new(
+  backend_dirs:   [['config/locales'], ['engines/blog/config/locales']], # chain order
+  default_locales: [:en],
+  fallback_mapping: { :"de-AT" => :de }
+)
+
+checker.check.each do |finding|
+  finding.results.each do |result|
+    next if result.status == :ok
+    puts "#{result.status}: #{finding.alias_key} (locale #{result.locale})"
+    result.hops.each { |hop| puts "  #{hop}" }
+  end
+end
+checker.healthy? # => false if any cycle or dangling link was found
+```
+
+A CLI ships with the gem:
+
+```sh
+ruby -Ilib bin/i18n-alias-check \
+  --backend config/locales \
+  --backend engines/blog/config/locales \
+  --default-locale en --map de-AT=de --all
+```
+
+It prints the status and complete resolution chain of every alias (text or
+`--json`) and exits non-zero when a cycle or dangling reference is found, so
+it can gate releases.
+
 ## Tests
 
 You can run tests both with

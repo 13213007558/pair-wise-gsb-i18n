@@ -20,7 +20,9 @@ Gem::Specification.new do |s|
                      'source_code_uri'   => 'https://github.com/ruby-i18n/i18n',
                    }
 
-  s.files        = Dir.glob("lib/**/*") + %w(README.md MIT-LICENSE)
+  s.files        = Dir.glob("lib/**/*") + Dir.glob("bin/*") + %w(README.md MIT-LICENSE)
+  s.bindir       = 'bin'
+  s.executables  = ['i18n-alias-check']
   s.platform     = Gem::Platform::RUBY
   s.require_path = 'lib'
   s.required_rubygems_version = '>= 1.3.5'

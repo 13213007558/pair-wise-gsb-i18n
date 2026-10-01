@@ -1,0 +1,214 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Read-only checker for translation Symbol aliases (links).
+#
+# Loads translation files/directories into throwaway in-memory data and checks
+# every Symbol alias following the real backend-chain priority, scope rules
+# and locale fallback order of a production query. Reports cycles (including
+# cycles that only close across two backends), dangling references, dynamic
+# (Proc) values and the terminal type + full resolution chain of every alias.
+#
+# It never calls Procs and never modifies I18n.backend, I18n.config,
+# I18n.load_path, the fallbacks global or any translation cache.
+#
+# Usage:
+#   i18n-alias-check --backend DIR_OR_FILE [--backend DIR2] [options]
+#
+# Exit status: 0 when no cycles/dangling links were found, 1 otherwise.
+
+require 'optparse'
+require 'json'
+
+# Run from a source checkout (bin/i18n-alias-check) as well as from an
+# installed gem (where lib is on the load path via RubyGems).
+repo_lib = File.expand_path('../lib', __dir__)
+$LOAD_PATH.unshift(repo_lib) if File.directory?(repo_lib)
+require 'i18n/backend/alias_checker'
+
+module I18nAliasCheckCLI
+  module_function
+
+  def run(argv)
+    options = {
+      backend_groups: [],
+      default_locales: [:en],
+      fallback_map: {},
+      query_locales: nil,
+      fallbacks: true,
+      format: :text,
+      show_ok: false
+    }
+
+    parser = OptionParser.new do |opts|
+      opts.banner = 'Usage: i18n-alias-check --backend PATH [--backend PATH ...] [options]'
+
+      opts.on('-b', '--backend PATH',
+              'Translation file/dir for one backend. Repeat in chain order;',
+              'use ":" between paths to merge files into one backend.') do |path|
+        options[:backend_groups] << path.split(':').map(&:strip).reject(&:empty?)
+      end
+
+      opts.on('-d', '--default-locale LOCALE',
+              'Default fallback locale (repeatable). Default: en') do |locale|
+        (options[:default_locales] = [] unless options[:default_locales_set])
+        options[:default_locales_set] = true
+        options[:default_locales] << locale.to_sym
+      end
+
+      opts.on('-m', '--map FROM=TO',
+              'Explicit fallback mapping, e.g. de-AT=de (repeatable,',
+              'TO may itself be a colon-separated list).') do |pair|
+        from, to = pair.split('=', 2)
+        raise OptionParser::InvalidArgument, "expected FROM=TO: #{pair}" unless from && to
+
+        targets = to.split(':').map { |t| t.strip.to_sym }
+        options[:fallback_map][from.to_sym] = targets.size == 1 ? targets.first : targets
+      end
+
+      opts.on('-l', '--locale LOCALE',
+              'Locale to check every alias from (repeatable).',
+              'Default: every locale present in the data.') do |locale|
+        options[:query_locales] ||= []
+        options[:query_locales] << locale.to_sym
+      end
+
+      opts.on('--no-fallbacks', 'Do not apply locale fallbacks (exact locale only).') do
+        options[:fallbacks] = false
+      end
+
+      opts.on('--separator SEP', 'Key separator (default: .)') do |sep|
+        options[:separator] = sep
+      end
+
+      opts.on('--json', 'Emit machine-readable JSON.') do
+        options[:format] = :json
+      end
+
+      opts.on('--all', 'Also print aliases that resolve cleanly (text output).') do
+        options[:show_ok] = true
+      end
+
+      opts.on('-h', '--help', 'Show this help.') do
+        puts opts
+        exit 0
+      end
+    end
+    parser.parse!(argv)
+
+    if options[:backend_groups].empty?
+      warn parser.help
+      warn "\nError: at least one --backend path is required."
+      exit 2
+    end
+
+    checker = I18n::Backend::AliasChecker.new(
+      backend_dirs: options[:backend_groups],
+      fallback_mapping: options[:fallback_map].empty? ? nil : options[:fallback_map],
+      default_locales: options[:default_locales],
+      query_locales: options[:query_locales],
+      fallbacks: options[:fallbacks],
+      separator: options[:separator]
+    )
+
+    findings = checker.check
+    case options[:format]
+    when :json then emit_json(findings, checker)
+    else emit_text(findings, checker, options[:show_ok])
+    end
+  rescue I18n::InvalidLocaleData => e
+    warn "Invalid translation file #{e.filename}: #{e.message}"
+    exit 2
+  rescue ArgumentError => e
+    warn "Error: #{e.message}"
+    exit 2
+  end
+
+  def emit_text(findings, checker, show_ok)
+    puts "Backend chain: #{checker.backends.size} backend(s)"
+    checker.backends.each do |backend|
+      locales = backend[:data].keys.sort.join(', ')
+      puts "  backend ##{backend[:index]}: locales=#{locales}"
+    end
+    puts "Checked aliases from locales: #{checker.query_locales.sort.join(', ')}"
+    checker.fallback_order.each do |locale, order|
+      puts "  fallback order for #{locale}: #{order.join(' -> ')}"
+    end
+    puts
+
+    counts = Hash.new(0)
+    findings.each do |finding|
+      finding.results.each do |result|
+        counts[result.status] += 1
+        next if result.status == :ok && !show_ok
+
+        report(finding, result)
+      end
+    end
+
+    puts '----'
+    puts "aliases checked: #{findings.size}; ok: #{counts[:ok]}; " \
+         "cycles: #{counts[:cycle]}; dangling: #{counts[:dangling]}; " \
+         "dynamic: #{counts[:dynamic]}"
+
+    exit(counts[:cycle].zero? && counts[:dangling].zero? ? 0 : 1)
+  end
+
+  def report(finding, result)
+    label = {
+      ok: 'OK      ',
+      cycle: 'CYCLE   ',
+      dangling: 'DANGLING',
+      dynamic: 'DYNAMIC '
+    }.fetch(result.status)
+
+    puts "#{label} #{result.alias_key} (requested locale #{result.locale})"
+    finding.declared_in.each do |file|
+      puts "        declared in: #{file}"
+    end
+
+    if result.status == :ok
+      puts "        terminal type: #{result.terminal_type}" \
+           "#{result.terminal_file ? " (#{result.terminal_file})" : ''}"
+    end
+
+    result.hops.each { |hop| puts "        #{hop}" }
+    if result.ring
+      puts '        ring:'
+      result.ring.each { |line| puts "          #{line}" }
+    end
+    puts
+  end
+
+  def emit_json(findings, checker)
+    payload = {
+      backend_count: checker.backends.size,
+      query_locales: checker.query_locales,
+      fallback_order: checker.fallback_order,
+      findings: findings.map do |finding|
+        {
+          alias_key: finding.alias_key,
+          declared_in: finding.declared_in,
+          results: finding.results.map do |result|
+            {
+              locale: result.locale,
+              status: result.status,
+              terminal_type: result.terminal_type,
+              terminal_file: result.terminal_file,
+              hops: result.hops.map(&:to_s),
+              ring: result.ring
+            }
+          end
+        }
+      end
+    }
+    puts JSON.pretty_generate(payload)
+
+    bad = findings.any? do |finding|
+      finding.results.any? { |r| %i[cycle dangling].include?(r.status) }
+    end
+    exit(bad ? 1 : 0)
+  end
+end
+
+I18nAliasCheckCLI.run(ARGV)
