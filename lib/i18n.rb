@@ -313,9 +313,30 @@ module I18n
     # expects transliteration rules to be stored at
     # <tt>i18n.transliterate.rule</tt>.
     #
-    # Transliteration rules can either be a Hash or a Proc. Procs must accept a
-    # single string argument. Hash rules inherit the default transliteration
-    # rules, while Procs do not.
+    # Transliteration rules can be a Hash, a Proc or an Array of declarative
+    # rules. Hash and Array rules inherit the default transliteration rules,
+    # while Procs do not.
+    #
+    # In addition to single character Hash rules, an Array of declarative
+    # rules may match several input characters at once with limited context:
+    #
+    #    store_translations(:xx, i18n: {
+    #                          transliterate: {
+    #                            rule: [
+    #                              { "pattern" => "ch", "replacement" => "tch",
+    #                                "left" => "word_boundary" },
+    #                              { "pattern" => "ü", "replacement" => "ue" }
+    #                            ]
+    #                          }
+    #                        })
+    #
+    # Each rule may use the keys +pattern+ (required), +replacement+
+    # (required, may be an empty string), +left+ and +right+ (a literal
+    # string that must be adjacent, the anchor "start", "end" or
+    # "word_boundary", or an Array of alternatives) and +priority+ (an
+    # integer; higher wins). Rules match on Unicode NFC normalized input and
+    # the longest valid match wins by default. Replacement text is never fed
+    # back through the rules.
     #
     # *Examples*
     #
@@ -357,6 +378,25 @@ module I18n
       enforce_available_locales!(locale)
 
       config.backend.transliterate(locale, key, replacement)
+    rescue I18n::ArgumentError => exception
+      handle_exception((throw && :throw || raise && :raise), exception, locale, key, options)
+    end
+
+    # Transliterates like #transliterate, but returns an Array of
+    # I18n::Backend::Transliterator::Segment objects instead of a string.
+    # Each segment contains the output text and the codepoint range of the
+    # original input it was produced from. Proc transliteration rules do not
+    # support this and raise an I18n::ArgumentError.
+    #
+    #    segments = I18n.transliterate_segments("Jürgen")
+    #    segments.map(&:text)   # => ["J", "u", "r", "g", "e", "n"]
+    #    segments.last.input_range # => 4...5
+    def transliterate_segments(key, throw: false, raise: false, locale: nil, replacement: nil, **options)
+      locale ||= config.locale
+      raise Disabled.new('transliterate_segments') if locale == false
+      enforce_available_locales!(locale)
+
+      config.backend.transliterate_segments(locale, key, replacement)
     rescue I18n::ArgumentError => exception
       handle_exception((throw && :throw || raise && :raise), exception, locale, key, options)
     end

@@ -66,6 +66,45 @@ I18n.config.with(locale: :ja).set!
 `set!` stores a frozen config in the current execution context.
 This keeps inherited state safe and lets updates happen by replacing config objects.
 
+### Transliteration with declarative rules
+
+`I18n.transliterate` maps non-ASCII text to an ASCII approximation. Besides
+single character Hash mappings and Procs, transliteration rules can be an
+Array of declarative rules that match several input characters at once:
+
+```ruby
+I18n.backend.store_translations(:xx, i18n: {
+  transliterate: {
+    rule: [
+      # "ch" at the start of a word becomes "tch"
+      { "pattern" => "ch", "replacement" => "tch", "left" => "word_boundary" },
+      # plain pattern => replacement pairs work too
+      { "ü" => "ue", "ö" => "oe" }
+    ]
+  }
+})
+I18n.transliterate("chorus aching", locale: :xx) # => "tchorus atching"
+```
+
+Each rule supports the keys:
+
+* `pattern` (required) and `replacement` (required, may be an empty string)
+* `left` / `right`: a literal string that must sit immediately next to the
+  match (it is not consumed), one of the anchors `"start"`, `"end"` or
+  `"word_boundary"`, or an Array of alternatives
+* `priority`: an integer; higher priority wins
+
+The longest valid match wins by default, then priority, then declaration
+order. Matching runs on Unicode NFC normalized input (so `"u"` followed by a
+combining diaeresis matches a pattern of `"ü"`), replacement text is never
+fed back through the rules, and characters not covered by any rule still
+respect the `replacement` option. Single character mappings inherit the
+default Latin approximations and can be overridden.
+
+Use `I18n.transliterate_segments` to get an Array of segments that each
+carry their output text plus the codepoint range of the original input they
+were produced from.
+
 ## Features
 
 * Translation and localization
