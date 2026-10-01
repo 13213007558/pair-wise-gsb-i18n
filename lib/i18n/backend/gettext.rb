@@ -29,6 +29,14 @@ module I18n
     #  puts _("some string")
     #
     # Without it strings containing periods (".") will not be translated.
+    #
+    # When a PO file declares a +Plural-Forms+ header (nplurals and a plural
+    # expression), the rule is parsed safely (no Ruby code is evaluated) and
+    # used to pick the msgstr index for a given count. Files without such a
+    # header fall back to the preset I18n::Gettext.plural_keys. If several PO
+    # files for the same locale declare conflicting rules an error is raised
+    # by default; see I18n::Gettext.plural_forms_conflict_strategy= for other
+    # strategies.
 
     module Gettext
       class PoData < Hash
@@ -37,10 +45,18 @@ module I18n
         end
       end
 
+      # Reset translations and any Plural-Forms rules collected from PO files.
+      def reload!
+        @gettext_plural_forms = nil
+        super
+      end
+
       protected
         def load_po(filename)
           locale = ::File.basename(filename, '.po').to_sym
-          data = normalize(locale, parse(filename))
+          data = parse(filename)
+          register_plural_forms(locale, extract_plural_forms(data, filename))
+          data = normalize(locale, data, filename)
           [{ locale => data }, false]
         end
 
@@ -48,11 +64,48 @@ module I18n
           GetText::PoParser.new.parse(::File.read(filename), PoData.new)
         end
 
-        def normalize(locale, data)
+        # Reads the Plural-Forms entry from the PO file header (the msgstr of
+        # the empty msgid), if any. Returns an I18n::Gettext::PluralForms
+        # instance or nil when the file does not declare one.
+        def extract_plural_forms(data, filename)
+          header = data['']
+          return nil unless header.is_a?(String) && header =~ /^Plural-Forms:[ \t]*(.*?)[ \t]*$/
+
+          I18n::Gettext::PluralForms.parse($1, filename)
+        end
+
+        # Remembers the Plural-Forms rule declared by a PO file. When two
+        # files for the same locale declare different rules the behaviour is
+        # controlled by I18n::Gettext.plural_forms_conflict_strategy and
+        # defaults to raising an error - the last file never wins silently.
+        def register_plural_forms(locale, plural_forms)
+          return unless plural_forms
+
+          existing = gettext_plural_forms[locale]
+          if existing && existing != plural_forms
+            case I18n::Gettext.plural_forms_conflict_strategy
+            when :first
+              return
+            when :raise
+              raise I18n::Gettext::PluralForms::ConflictingRules,
+                "conflicting Plural-Forms rules for locale #{locale}: " \
+                "#{existing.expression.inspect} (nplurals=#{existing.nplurals}, from #{existing.location}) vs " \
+                "#{plural_forms.expression.inspect} (nplurals=#{plural_forms.nplurals}, from #{plural_forms.location})"
+            end
+          end
+
+          gettext_plural_forms[locale] = plural_forms
+        end
+
+        def gettext_plural_forms
+          @gettext_plural_forms ||= {}
+        end
+
+        def normalize(locale, data, filename = nil)
           data.inject({}) do |result, (key, value)|
             unless key.nil? || key.empty?
               key = key.gsub(I18n::Gettext::CONTEXT_SEPARATOR, '|')
-              key, value = normalize_pluralization(locale, key, value) if key.index("\000")
+              key, value = normalize_pluralization(locale, key, value, filename) if key.index("\000")
 
               parts = key.split('|').reverse
               normalized = parts.inject({}) do |_normalized, part|
@@ -65,17 +118,42 @@ module I18n
           end
         end
 
-        def normalize_pluralization(locale, key, value)
+        def normalize_pluralization(locale, key, value, filename = nil)
           # FIXME po_parser includes \000 chars that can not be turned into Symbols
           key = key.gsub("\000", I18n::Gettext::PLURAL_SEPARATOR).split(I18n::Gettext::PLURAL_SEPARATOR).first
 
-          keys = I18n::Gettext.plural_keys(locale)
           values = value.split("\000")
-          raise "invalid number of plurals: #{values.size}, keys: #{keys.inspect} on #{locale} locale for msgid #{key.inspect} with values #{values.inspect}" if values.size != keys.size
+          plural_forms = gettext_plural_forms[locale]
 
           result = {}
-          values.each_with_index { |_value, ix| result[keys[ix]] = _value }
+          if plural_forms
+            if values.size != plural_forms.nplurals
+              raise I18n::Gettext::PluralForms::PluralCountMismatch,
+                "#{filename}: msgid #{key.inspect} has #{values.size} plural translations, " \
+                "but the Plural-Forms header declares nplurals=#{plural_forms.nplurals} (locale: #{locale})"
+            end
+            values.each_with_index { |_value, ix| result[ix] = _value }
+          else
+            keys = I18n::Gettext.plural_keys(locale)
+            raise "invalid number of plurals: #{values.size}, keys: #{keys.inspect} on #{locale} locale for msgid #{key.inspect} with values #{values.inspect}" if values.size != keys.size
+            values.each_with_index { |_value, ix| result[keys[ix]] = _value }
+          end
           [key, result]
+        end
+
+        # Picks the msgstr[index] selected by the Plural-Forms rule declared
+        # in the PO file itself. Entries that were not loaded from a PO file
+        # with a Plural-Forms header fall back to the default behaviour.
+        def pluralize(locale, entry, count)
+          plural_forms = gettext_plural_forms[locale]
+
+          if plural_forms && entry.is_a?(Hash) && entry.keys.any? { |key| key.is_a?(Integer) }
+            index = plural_forms.call(count)
+            raise InvalidPluralizationData.new(entry, count, index) unless entry.has_key?(index)
+            entry[index]
+          else
+            super
+          end
         end
 
     end
