@@ -92,6 +92,55 @@ module I18n
         object.strftime(format)
       end
 
+      def localize_interval(locale, start_object, end_object = nil, format = :default, options = EMPTY_HASH)
+        if start_object.respond_to?(:first) && start_object.respond_to?(:last)
+          start_object, end_object = start_object.first, start_object.last
+        end
+
+        unless start_object.respond_to?(:strftime) && end_object.respond_to?(:strftime)
+          raise ArgumentError, "Objects must be Dates, DateTimes or Times. #{start_object.inspect}, #{end_object.inspect} given."
+        end
+        if start_object.respond_to?(:sec) != end_object.respond_to?(:sec)
+          raise ArgumentError, "Interval objects must be the same type. #{start_object.inspect}, #{end_object.inspect} given."
+        end
+
+        interval_options = options.dup
+        return_fragments = interval_options.delete(:fragments) || interval_options.delete(:parts)
+        time_zone = interval_options.delete(:time_zone) || interval_options.delete(:zone)
+        start_object = localize_interval_in_time_zone(start_object, time_zone)
+        end_object = localize_interval_in_time_zone(end_object, time_zone)
+
+        type = start_object.respond_to?(:sec) || end_object.respond_to?(:sec) ? 'time' : 'date'
+        granularity = interval_granularity(start_object, end_object)
+        separator = resolve_interval_separator(locale, type, interval_options)
+        pattern = resolve_interval_pattern(locale, type, format, granularity, interval_options)
+        pattern = nil unless valid_interval_pattern?(
+          pattern, granularity, separator, start_object, end_object
+        )
+
+        unless pattern
+          return localize_interval_fallback(
+            locale,
+            start_object,
+            end_object,
+            type,
+            granularity,
+            format.is_a?(::String) ? :default : format,
+            separator,
+            interval_options,
+            return_fragments
+          )
+        end
+
+        parts = localize_interval_parts(
+          locale, start_object, end_object, pattern, granularity, separator, interval_options
+        )
+        string = parts.map { |part| part[:value] }.join
+
+        return string unless return_fragments
+        { :string => string, :fragments => parts }
+      end
+
       # Returns an array of locales for which translations are available
       # ignoring the reserved translation meta data key :i18n.
       def available_locales
@@ -108,8 +157,299 @@ module I18n
 
       protected
 
+        INTERVAL_GRANULARITIES = [
+          :year, :month, :day, :hour, :minute, :second, :offset
+        ].freeze
+
+        INTERVAL_DIRECTIVE_FIELDS = {
+          'Y' => :year, 'C' => :year, 'G' => :year,
+          'b' => :month, 'B' => :month, 'h' => :month, 'm' => :month,
+          'd' => :day, 'e' => :day, 'j' => :day,
+          'H' => :hour, 'k' => :hour, 'I' => :hour, 'l' => :hour,
+          'p' => :hour, 'P' => :hour,
+          'M' => :minute,
+          'S' => :second, 'L' => :second, 'N' => :second, 's' => :second,
+          'z' => :offset, 'Z' => :offset,
+        }.freeze
+
+        INTERVAL_COMPOSITE_DIRECTIVES = {
+          'c' => :second, 'D' => :day, 'F' => :day, 'r' => :hour,
+          'R' => :minute, 'T' => :second, 'v' => :day, 'V' => :second,
+          'x' => :day, 'X' => :second,
+        }.freeze
+
         def eager_loaded?
           @eager_loaded ||= false
+        end
+
+        def interval_granularity(start_object, end_object)
+          INTERVAL_GRANULARITIES.each do |granularity|
+            next if granularity == :offset && !start_object.respond_to?(:utc_offset)
+            return granularity if interval_field_differs?(start_object, end_object, granularity)
+          end
+          :none
+        end
+
+        def interval_field_differs?(start_object, end_object, field)
+          case field
+          when :year then start_object.year != end_object.year
+          when :month then start_object.mon != end_object.mon
+          when :day then start_object.mday != end_object.mday
+          when :hour
+            (!start_object.respond_to?(:hour) || !end_object.respond_to?(:hour) ||
+              interval_field_value(start_object, :hour) != interval_field_value(end_object, :hour))
+          when :minute
+            (!start_object.respond_to?(:min) || !end_object.respond_to?(:min) ||
+              interval_field_value(start_object, :min) != interval_field_value(end_object, :min))
+          when :second
+            (!start_object.respond_to?(:sec) || !end_object.respond_to?(:sec) ||
+              interval_field_value(start_object, :sec) != interval_field_value(end_object, :sec))
+          when :offset
+            (!start_object.respond_to?(:utc_offset) || !end_object.respond_to?(:utc_offset) ||
+              start_object.utc_offset != end_object.utc_offset ||
+              (start_object.respond_to?(:zone) && end_object.respond_to?(:zone) &&
+                start_object.zone != end_object.zone)
+              )
+          end
+        end
+
+        def interval_field_value(object, field)
+          object.respond_to?(field) ? object.public_send(field) : 0
+        end
+
+        def resolve_interval_pattern(locale, type, format, granularity, options)
+          return nil if granularity == :none
+          return format if format.is_a?(::String)
+
+          format_name = format.is_a?(::Symbol) ? format : :default
+          patterns = catch(:exception) do
+            I18n.t(
+              :"#{type}.interval_formats.#{format_name}",
+              **options.merge(:throw => true, :locale => locale)
+            )
+          end
+          return nil unless patterns.is_a?(::Hash)
+
+          patterns[granularity] || patterns[granularity.to_s] ||
+            interval_pattern_alias(patterns, granularity)
+        end
+
+        def interval_pattern_alias(patterns, granularity)
+          case granularity
+          when :offset
+            patterns[:zone] || patterns['zone'] ||
+              patterns[:time_zone] || patterns['time_zone']
+          when :hour
+            patterns[:meridian] || patterns['meridian'] ||
+              patterns[:am_pm] || patterns['am_pm']
+          end
+        end
+
+        def valid_interval_pattern?(pattern, granularity, separator = ' – ', start_object = nil, end_object = nil)
+          return false unless pattern.is_a?(::String)
+          return true if granularity == :none
+
+          minimum_rank = INTERVAL_GRANULARITIES.index(granularity)
+          tokens = parse_interval_format(pattern, granularity, separator)
+          fields = tokens.map { |token| token[:field] }.uniq
+          fields.select do |field|
+            rank = INTERVAL_GRANULARITIES.index(field)
+            rank && rank < minimum_rank
+          end.all? do |field|
+            count = tokens.count { |token| token[:field] == field }
+            count >= 2 ||
+              !start_object || !end_object || !interval_field_differs?(start_object, end_object, field)
+          end && tokens.count { |token| token[:field] == granularity } >= 2
+        end
+
+        def localize_interval_parts(locale, start_object, end_object, pattern, granularity, separator, options)
+          tokens = parse_interval_format(pattern, granularity, separator)
+          parts = tokens.filter_map do |token|
+            object = token[:source] == :end ? end_object : start_object
+            value = if token[:directive]
+              localize_interval_token(locale, object, token[:value], options)
+            else
+              token[:value]
+            end
+            next if value.empty?
+            { :source => token[:source], :value => value }
+          end
+
+          parts.each_with_object([]) do |part, merged|
+            if merged.last && merged.last[:source] == part[:source]
+              merged.last[:value] += part[:value]
+            else
+              merged << part
+            end
+          end
+        end
+
+        def parse_interval_format(pattern, granularity = :none, separator = ' – ')
+          tokens = []
+          scanner = /%[\-\^#0_:+ ]*(?:[0-9]+|\*)?(?:\.[0-9]+)?[EO]?[a-zA-Z%]|./m
+
+          pattern.scan(scanner) do |text|
+            if text == '%%'
+              append_interval_literal(tokens, '%')
+              next
+            end
+
+            directive = text[-1]
+            field = INTERVAL_DIRECTIVE_FIELDS.fetch(directive, nil) ||
+              INTERVAL_COMPOSITE_DIRECTIVES[directive]
+
+            unless field
+              append_interval_literal(tokens, text)
+              next
+            end
+
+            tokens << {
+              :value => text,
+              :directive => true,
+              :field => field,
+              :directive_name => directive,
+              :source => :shared,
+            }
+          end
+          assign_interval_sources(tokens, granularity, separator)
+        end
+
+        def assign_interval_sources(tokens, granularity, separator)
+          return tokens if granularity == :none
+
+          maximum_rank = INTERVAL_GRANULARITIES.index(granularity)
+          return tokens if maximum_rank.nil?
+
+          anchor_name = tokens.find do |token|
+            token[:directive] && token[:field] == granularity
+          end
+          return tokens unless anchor_name
+          anchor_name = anchor_name[:directive_name]
+          anchor_occurrences = 0
+
+          tokens.each do |token|
+            next unless token[:directive]
+
+            rank = INTERVAL_GRANULARITIES.index(token[:field])
+            if rank.nil? || rank < maximum_rank
+              token[:source] = :shared
+              next
+            end
+
+            if token[:field] == granularity && token[:directive_name] == anchor_name
+              anchor_occurrences += 1
+            end
+
+            token[:source] = case
+                             when anchor_occurrences < 2 then :start
+                             when anchor_occurrences == 2 then :end
+                             else :shared
+                             end
+          end
+          assign_interval_literal_sources(tokens, separator)
+          tokens
+        end
+
+        def assign_interval_literal_sources(tokens, separator)
+          current_source = :shared
+
+          tokens.each_with_index do |token, index|
+            if token[:directive]
+              current_source = token[:source]
+              next
+            end
+
+            next_source = tokens[index + 1..].find { |candidate| candidate[:directive] }&.dig(:source) || current_source
+            before, connection, after = split_interval_literal(token[:value], separator)
+
+            if connection
+              replacement = []
+              replacement << { :value => before, :source => current_source } unless before.empty?
+              replacement << { :value => connection, :source => :shared }
+              replacement << { :value => after, :source => next_source } unless after.empty?
+              tokens[index] = replacement
+            else
+              token[:source] = current_source
+            end
+          end
+          tokens.flatten!
+        end
+
+        def split_interval_literal(value, separator)
+          index = value.index(separator)
+          return [value, nil, nil] unless index
+
+          [value[0, index], separator, value[index + separator.length..]]
+        end
+
+        def append_interval_literal(tokens, text)
+          if tokens.last && !tokens.last[:directive] && tokens.last[:source] == :shared
+            tokens.last[:value] += text
+          else
+            tokens << { :value => text, :directive => false, :field => nil, :source => :shared }
+          end
+        end
+
+        def localize_interval_token(locale, object, format, options)
+          format = translate_localization_format(locale, object, format, options)
+          object.strftime(format)
+        end
+
+        def localize_interval_in_time_zone(object, time_zone)
+          return object if time_zone.nil?
+          if time_zone.respond_to?(:utc_to_local)
+            return time_zone.utc_to_local(object.respond_to?(:utc) ? object.utc : object)
+          end
+          return object.getlocal(time_zone) if object.respond_to?(:getlocal)
+          return object.new_offset(time_zone) if object.respond_to?(:new_offset)
+
+          object
+        end
+
+        def localize_interval_fallback(locale, start_object, end_object, type, granularity, format, separator, options, return_fragments)
+          start_string = localize_interval_fallback_endpoint(
+            locale, start_object, type, granularity, format, options
+          )
+          end_string = localize_interval_fallback_endpoint(
+            locale, end_object, type, granularity, format, options
+          )
+          string = "#{start_string}#{separator}#{end_string}"
+          return string unless return_fragments
+
+          {
+            :string => string,
+            :fragments => [
+              { :source => :start, :value => start_string },
+              { :source => :shared, :value => separator },
+              { :source => :end, :value => end_string },
+            ],
+          }
+        end
+
+        def localize_interval_fallback_endpoint(locale, object, type, granularity, format, options)
+          string = I18n.localize(object, :locale => locale, :format => format, **options)
+          return string unless granularity == :offset &&
+            !interval_format_includes_time_zone?(locale, type, format)
+
+          "#{string} #{object.strftime('%z')}"
+        end
+
+        def interval_format_includes_time_zone?(locale, type, format)
+          return format.to_s.match?(/%[\-\^#0_:+ ]*(?:z|Z)/) unless format.is_a?(::Symbol)
+
+          resolved = catch(:exception) do
+            I18n.t(:"#{type}.formats.#{format}", :locale => locale, :throw => true)
+          end
+          resolved.is_a?(::String) && resolved.match?(/%[\-\^#0_:+ ]*(?:z|Z)/)
+        end
+
+        def resolve_interval_separator(locale, type, options)
+          return options[:interval_separator] if options.key?(:interval_separator)
+
+          separator = catch(:exception) do
+            I18n.t(:"#{type}.interval_formats.separator", :locale => locale, :throw => true)
+          end if type
+          separator.is_a?(::String) ? separator : ' – '
         end
 
         # The method which actually looks up for the translation in the store.

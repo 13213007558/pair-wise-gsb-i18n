@@ -32,6 +32,10 @@ module I18n
     scope
     separator
     throw
+    fragments
+    parts
+    time_zone
+    interval_separator
   ]
   EMPTY_HASH = {}.freeze
 
@@ -371,6 +375,16 @@ module I18n
       config.backend.localize(locale, object, format, options)
     end
     alias :l :localize
+
+    # Localizes an interval between two dates or times using the locale's interval format table.
+    def localize_interval(start_object, end_object = nil, locale: nil, format: nil, **options)
+      locale ||= config.locale
+      raise Disabled.new('localize_interval') if locale == false
+      enforce_available_locales!(locale)
+
+      format ||= :default
+      config.backend.localize_interval(locale, start_object, end_object, format, options)
+    end
 
     # Executes block with given I18n.locale set.
     def with_locale(tmp_locale = nil)
