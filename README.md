@@ -72,12 +72,37 @@ This keeps inherited state safe and lets updates happen by replacing config obje
 * Interpolation of values to translations
 * Pluralization (CLDR compatible)
 * Customizable transliteration to ASCII
+* Configurable Unicode collation with reusable sort keys
 * Flexible defaults
 * Bulk lookup
 * Lambdas as translation data
 * Custom key/scope separator
 * Custom exception handlers
 * Extensible architecture with a swappable backend
+
+## Unicode collation
+
+`I18n.collation` creates an explicit, reusable collator from a fixed versioned
+weight table and locale tailoring. It does not call ICU or download data at
+runtime:
+
+```ruby
+collator = I18n.collation(
+  weights: :uca,
+  locale: :cs,
+  numeric: true,
+  ignore_punctuation: true
+)
+
+collator.sort(%w[10 z 2 á])
+collator.compare('á', "a\u0301") # => 0
+collator.sort_key('z')
+```
+
+Small custom tables are useful for deterministic tests and embedded data. Each
+element is `[primary, secondary, tertiary]`; an array of elements represents an
+expansion, and a source string with multiple code points represents a
+contraction. Sort keys from different configurations refuse to compare.
 
 ## Pluggable Features
 

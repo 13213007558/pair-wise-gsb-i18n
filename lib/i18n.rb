@@ -11,6 +11,7 @@ require 'i18n/interpolate/ruby'
 module I18n
   autoload :Backend, 'i18n/backend'
   autoload :Config,  'i18n/config'
+  autoload :Collation, 'i18n/collation'
   autoload :Gettext, 'i18n/gettext'
   autoload :Locale,  'i18n/locale'
   autoload :Tests,   'i18n/tests'
@@ -37,6 +38,10 @@ module I18n
 
   def self.new_double_nested_cache # :nodoc:
     Concurrent::Map.new { |h, k| h[k] = Concurrent::Map.new }
+  end
+
+  def self.collation(**options)
+    Collation.new(**options)
   end
 
   # Marks a key as reserved. Reserved keys are used internally,
