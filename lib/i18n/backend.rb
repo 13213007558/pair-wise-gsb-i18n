@@ -3,6 +3,7 @@
 module I18n
   module Backend
     autoload :Base,                  'i18n/backend/base'
+    autoload :Agreement,             'i18n/backend/agreement'
     autoload :Cache,                 'i18n/backend/cache'
     autoload :CacheFile,             'i18n/backend/cache_file'
     autoload :Cascade,               'i18n/backend/cascade'

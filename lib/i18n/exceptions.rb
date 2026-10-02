@@ -95,6 +95,33 @@ module I18n
     end
   end
 
+  class InvalidAgreementData < ArgumentError
+    attr_reader :entry, :reason
+    def initialize(entry, reason)
+      @entry, @reason = entry, reason
+      super "translation data #{entry.inspect} can not be used as an agreement message: #{reason}"
+    end
+  end
+
+  class AgreementConflict < ArgumentError
+    attr_reader :segments, :constraints
+    def initialize(segments, constraints)
+      @segments, @constraints = segments, constraints
+      message = "no agreement possible between segments #{segments.inspect}"
+      message += " given the constraints #{constraints.inspect}" unless constraints.empty?
+      super message
+    end
+  end
+
+  class AmbiguousAgreement < ArgumentError
+    attr_reader :solutions
+    def initialize(solutions)
+      @solutions = solutions
+      super "agreement is ambiguous, #{solutions.size} feature combinations are possible: " \
+            "#{solutions.inspect}. Pass :agreement constraints or add a :default rule to the message."
+    end
+  end
+
   class MissingInterpolationArgument < ArgumentError
     attr_reader :key, :values, :string
     def initialize(key, values, string)

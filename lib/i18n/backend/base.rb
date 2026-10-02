@@ -48,6 +48,7 @@ module I18n
 
         entry = entry.dup if entry.is_a?(String)
         entry = pluralize(locale, entry, count) if count
+        entry = agree(locale, entry, options)
 
         if entry.nil? && !subtrees?
           throw(:exception, I18n::MissingTranslation.new(locale, key, options))
@@ -186,6 +187,14 @@ module I18n
           key = pluralization_key(entry, count)
           raise InvalidPluralizationData.new(entry, count, key) unless entry.has_key?(key)
           entry[key]
+        end
+
+        # Resolves an agreement message to a single String. The base
+        # implementation returns the entry unchanged. See
+        # I18n::Backend::Agreement for an implementation that solves the
+        # legal feature combinations of the message before interpolating.
+        def agree(locale, entry, options)
+          entry
         end
 
         # Interpolates values into a given subject.
