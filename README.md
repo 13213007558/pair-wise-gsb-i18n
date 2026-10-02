@@ -79,6 +79,43 @@ This keeps inherited state safe and lets updates happen by replacing config obje
 * Custom exception handlers
 * Extensible architecture with a swappable backend
 
+### Morphological agreement
+
+When several placeholders must share gender, number, case, or other
+grammatical features, use an explicit agreement message instead of choosing a
+word form for each fragment independently:
+
+```ruby
+phrase = I18n::Agreement::Message.new(
+  template: "%{article} %{noun}",
+  features: [:gender, :number],
+  default_features: { number: :singular },
+  fragments: {
+    article: {
+      forms: {
+        "el" => { gender: :masculine, number: :singular },
+        "los" => { gender: :masculine, number: :plural }
+      }
+    },
+    noun: {
+      forms: {
+        "libro" => { gender: :masculine, number: :singular },
+        "libros" => { gender: :masculine, number: :plural }
+      }
+    }
+  }
+)
+I18n.backend.store_translations(:es, books: phrase)
+I18n.t(:books)                                        # => "el libro"
+I18n.t(:books, agreement_features: { number: :plural }) # => "los libros"
+```
+
+Caller features are hard constraints. All compatible combinations are found
+before interpolation. If no combination exists, `I18n::AgreementConflict`
+identifies the conflicting fragments; if defaults do not make the result
+unique, `I18n::AmbiguousAgreement` lists the remaining combinations. Plain
+strings, regular interpolation, and existing pluralization are unchanged.
+
 ## Pluggable Features
 
 * Cache

@@ -56,6 +56,10 @@ module I18n
         deep_interpolation = options[:deep_interpolation]
         skip_interpolation = options[:skip_interpolation]
         values = Utils.except(options, *RESERVED_KEYS) unless options.empty?
+        if !skip_interpolation && entry.respond_to?(:i18n_agreement_resolve)
+          agreement_values = values.nil? ? EMPTY_HASH : Utils.except(values, :agreement_features)
+          return entry.i18n_agreement_resolve(options[:agreement_features] || EMPTY_HASH, agreement_values)
+        end
         if !skip_interpolation && values && !values.empty?
           entry = if deep_interpolation
             deep_interpolate(locale, entry, values)
@@ -205,7 +209,7 @@ module I18n
           when ::String then I18n.interpolate(subject, values)
           when ::Array then subject.map { |element| interpolate(locale, element, values) }
           else
-            subject
+            resolve_agreement(subject, values) || subject
           end
         end
 
@@ -220,6 +224,8 @@ module I18n
           case data
           when ::String
             I18n.interpolate(data, values)
+          when ->(entry) { entry.respond_to?(:i18n_agreement_resolve) }
+            resolve_agreement(data, values)
           when ::Hash
             data.each_with_object({}) do |(k, v), result|
               result[k] = deep_interpolate(locale, v, values)
@@ -231,6 +237,12 @@ module I18n
           else
             data
           end
+        end
+
+        def resolve_agreement(entry, values = EMPTY_HASH)
+          return nil unless entry.respond_to?(:i18n_agreement_resolve)
+
+          entry.i18n_agreement_resolve(EMPTY_HASH, Utils.except(values, :agreement_features))
         end
 
         # Loads a single translations file by delegating to #load_rb or
