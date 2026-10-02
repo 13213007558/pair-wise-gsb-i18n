@@ -12,6 +12,7 @@ module I18n
   autoload :Backend, 'i18n/backend'
   autoload :Config,  'i18n/config'
   autoload :Gettext, 'i18n/gettext'
+  autoload :LocalizedInterval, 'i18n/localized_interval'
   autoload :Locale,  'i18n/locale'
   autoload :Tests,   'i18n/tests'
   autoload :Middleware,   'i18n/middleware'
@@ -371,6 +372,29 @@ module I18n
       config.backend.localize(locale, object, format, options)
     end
     alias :l :localize
+
+    # Localizes a Date, DateTime or Time interval using the interval format
+    # table provided by the locale. Pass :parts => true to also receive the
+    # fragments belonging to the start, end, or shared portions of the pattern.
+    def localize_interval(first_object, second_object = nil, locale: nil, format: nil, **options)
+      if first_object.respond_to?(:begin)
+        interval = first_object
+        if second_object.is_a?(::Symbol) || second_object.is_a?(::String)
+          format ||= second_object
+          second_object = nil
+        end
+        second_object = interval.end if second_object.nil? && interval.respond_to?(:end)
+        first_object = interval.begin if interval.respond_to?(:end)
+      end
+
+      locale ||= config.locale
+      raise Disabled.new('localize_interval') if locale == false
+      enforce_available_locales!(locale)
+
+      format ||= :default
+      config.backend.localize_interval(locale, first_object, second_object, format, options)
+    end
+    alias :li :localize_interval
 
     # Executes block with given I18n.locale set.
     def with_locale(tmp_locale = nil)
