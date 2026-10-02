@@ -10,6 +10,7 @@ require 'i18n/interpolate/ruby'
 
 module I18n
   autoload :Backend, 'i18n/backend'
+  autoload :Collation, 'i18n/collation'
   autoload :Config,  'i18n/config'
   autoload :Gettext, 'i18n/gettext'
   autoload :Locale,  'i18n/locale'
@@ -361,6 +362,44 @@ module I18n
       handle_exception((throw && :throw || raise && :raise), exception, locale, key, options)
     end
 
+    # Configures the reusable collator used by I18n.sort_key, I18n.compare,
+    # I18n.collate, and I18n.sort_names.
+    def collation=(collation)
+      writable_config.collation = collation
+    end
+
+    # Returns the configured reusable collator.
+    def collation
+      config.collation
+    end
+
+    # Builds and assigns an I18n::Collation::Collator from the given fixed
+    # weight table and locale tailorings.
+    def configure_collation(**options)
+      self.collation = Collation::Collator.new(**options)
+    end
+
+    # Returns a stable, reusable sort key for a string.
+    def sort_key(string, locale: nil)
+      collation_for(locale).sort_key(string)
+    end
+    alias_method :collation_key, :sort_key
+
+    # Compares two strings using configured collation weights. Returns -1, 0,
+    # or 1 like String#<=>.
+    def compare(left, right, locale: nil)
+      collation_for(locale).compare(left, right)
+    end
+    alias_method :compare_collated, :compare
+    alias_method :collation_compare, :compare
+
+    # Returns values in stable collation order.
+    def collate(values, locale: nil)
+      collation_for(locale).collate(values)
+    end
+    alias_method :sort_names, :collate
+    alias_method :collation_sort, :collate
+
     # Localizes certain objects, such as dates and numbers to local formatting.
     def localize(object, locale: nil, format: nil, **options)
       locale ||= config.locale
@@ -418,6 +457,15 @@ module I18n
     end
 
   private
+
+    def collation_for(locale)
+      collator = config.collation ||
+        raise(Collation::MissingCollation, 'configure I18n.collation before collating strings')
+
+      requested = locale || config.locale
+      requested = requested.to_s.tr('-', '_').downcase.to_sym
+      requested == collator.locale ? collator : collator.for(locale: requested)
+    end
 
     def translate_key(key, throw, raise, locale, backend, options)
       result = catch(:exception) do

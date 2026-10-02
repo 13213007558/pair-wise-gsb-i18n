@@ -66,12 +66,63 @@ I18n.config.with(locale: :ja).set!
 `set!` stores a frozen config in the current execution context.
 This keeps inherited state safe and lets updates happen by replacing config objects.
 
+### Collation
+
+Configure a reusable collator with a fixed versioned weight table. The default
+implementation is pure Ruby and never downloads data or uses a native ICU
+extension. Multilevel weights, NFD canonical equivalence, contractions,
+expansions, optional punctuation suppression, and natural numeric fragments are
+supported.
+
+```ruby
+weights = {
+  version: "app-ducet-1",
+  variable: [" ", ",", "-"],
+  mappings: {
+    "a" => [0x1C47, 0x20, 0x02],
+    "A" => [0x1C47, 0x20, 0x08],
+    "ch" => [[0x1C49, 0x20, 0x02]],
+    "ß" => [[0x1C5C, 0x20, 0x02], [0x1C5C, 0x20, 0x02]]
+  }
+}
+
+tailorings = {
+  root: {},
+  de: { "ch" => [[0x1C49, 0x25, 0x02]] }
+}
+
+I18n.configure_collation(
+  locale: :de,
+  weights: weights,
+  tailorings: tailorings,
+  numeric: true,
+  ignore_punctuation: true
+)
+
+I18n.sort_key("Müller")
+I18n.compare("Straße", "strassen")
+I18n.sort_names(["Name 10", "Name 2"])
+```
+
+Official Unicode `allkeys.txt` lines can also be loaded from a local fixed
+file:
+
+```ruby
+collator = I18n::Collation::Collator.new(weights: "/opt/data/allkeys-16.0.0.txt")
+```
+
+`SortKey#<=>` raises `I18n::Collation::IncompatibleSortKey` when the keys were
+generated with a different weight version, locale tailoring, strength, or other
+collation option. Equal keys remain stable in `I18n.sort_names`, preserving the
+original array order.
+
 ## Features
 
 * Translation and localization
 * Interpolation of values to translations
 * Pluralization (CLDR compatible)
 * Customizable transliteration to ASCII
+* Locale-aware collation with reusable versioned sort keys
 * Flexible defaults
 * Bulk lookup
 * Lambdas as translation data

@@ -195,5 +195,13 @@ module I18n
     def interpolation_patterns=(interpolation_patterns)
       @@interpolation_patterns = interpolation_patterns
     end
+
+    def collation
+      @@collation ||= nil
+    end
+
+    def collation=(collation)
+      @@collation = collation
+    end
   end
 end
